@@ -9,11 +9,9 @@ const prisma = new PrismaClient();
 
 export default async function handler(req, res) {
 
-  console.log('Using DATABASE_URL:', process.env.DATABASE_URL);
 
   // Run CORS middleware
   await runMiddleware(req, res, cors);
-  console.log('req.method',req.method);
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -44,7 +42,6 @@ if (existingUser) {
         password: hashedPassword,
       },
     });
-    console.log('newUser123',newUser);
 
     return res.status(201).json({ message: 'User created', userId: newUser.id });
   } catch (error) {

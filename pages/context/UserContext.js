@@ -18,10 +18,9 @@ export function UserProvider({ children }) {
       const res = await fetch("/api/user", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        console.log("data111", data);
 
-        console.log("res11", res);
-        if (data?.authenticated || res?.status === 200) setUser(data.user || res.user);
+        if (data?.authenticated || res?.status === 200)
+          setUser(data.user || res.user);
         else setUser(null);
       } else {
         setUser(null);

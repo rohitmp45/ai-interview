@@ -22,10 +22,7 @@ export default async function handler(req, res) {
   const redirectUri =
     GOOGLE_REDIRECT_URI || `${baseUrl}/api/auth/google/callback`;
 
-  console.log("OAuth Debug Info:");
-  console.log("- baseUrl:", baseUrl);
-  console.log("- redirectUri:", redirectUri);
-  console.log("- origin:", origin);
+ 
 
   const state = Buffer.from(JSON.stringify({ origin, returnTo })).toString(
     "base64url"

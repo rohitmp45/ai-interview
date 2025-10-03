@@ -57,7 +57,6 @@ export default async function handler(req, res) {
       }
     );
     const profile = await userInfoRes.json();
-    console.log("profile124", profile);
     if (!userInfoRes.ok) {
       return res
         .status(400)

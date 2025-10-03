@@ -1,11 +1,17 @@
 import { useEffect } from "react";
 import { useUser } from "../context/UserContext";
 import { useRouter } from "next/router";
+import CheckoutForm from "../component/CheckoutForm";
+import { Elements } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
+import { Box } from "@mui/material";
 
 const Index = () => {
   const { user, loading, fetchMe, logout } = useUser();
   const router = useRouter();
-
+  const stripePromise = loadStripe(
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  );
   useEffect(() => {
     if (!user) fetchMe();
   }, [user, fetchMe]);
@@ -34,7 +40,9 @@ const Index = () => {
               fontWeight: 700,
             }}
           >
-            {loading ? "Loading..." : `Welcome back, ${user?.name || user?.email}`}
+            {loading
+              ? "Loading..."
+              : `Welcome back, ${user?.name || user?.email}`}
           </div>
           <button
             onClick={onLogout}
@@ -52,6 +60,21 @@ const Index = () => {
             Logout
           </button>
         </div>
+        <Elements stripe={stripePromise}>
+          <Box
+            sx={{
+              width: 420,
+              maxWidth: "92vw",
+              pt: "100px",
+              border: "1px solid #e0e0e0",
+              borderRadius: 2,
+              p: 2,
+              backgroundColor: "white",
+            }}
+          >
+            <CheckoutForm />
+          </Box>
+        </Elements>
       </div>
     </>
   );

@@ -28,7 +28,6 @@ function Guard({ children }) {
   const { pathname } = router; // Get pathname from the router
   const { user, loading } = useUser();
   const [allowed, setAllowed] = useState(false);
-  console.log("loading", loading);
   useEffect(() => {
     if (loading) return;
 
