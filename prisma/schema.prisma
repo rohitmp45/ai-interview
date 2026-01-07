@@ -16,6 +16,7 @@ model User {
   avatarUrl String?
   createdAt DateTime  @default(now())
   payments  Payment[]
+  todos     Todo[]
 }
 
 model Payment {
@@ -27,4 +28,17 @@ model Payment {
   userId          Int
   user            User     @relation(fields: [userId], references: [id])
   createdAt       DateTime @default(now())
+}
+
+model Todo {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  completed   Boolean  @default(false)
+  scheduledAt DateTime? // When to notify user
+  notified    Boolean  @default(false) // Track if notification was sent
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

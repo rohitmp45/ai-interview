@@ -1,16 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useUser } from "../context/UserContext";
 import { useTheme } from "../context/ThemeContext";
 import { useRouter } from "next/router";
 import CheckoutForm from "../component/CheckoutForm";
+import TodoApp from "../component/TodoApp";
 import { Elements } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { Box, Typography, Button } from "@mui/material";
+import { Box, Typography, Button, Tabs, Tab } from "@mui/material";
 
 const Index = () => {
   const { user, loading, fetchMe, logout } = useUser();
   const { theme } = useTheme();
   const router = useRouter();
+  const [tabValue, setTabValue] = useState(0);
   const stripePromise = loadStripe(
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
   );
@@ -29,23 +31,23 @@ const Index = () => {
       sx={{
         minHeight: "100vh",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: { xs: "column", md: "row" },
-        gap: 4,
+        flexDirection: "column",
         p: 2,
         bgcolor: "background.default",
       }}
     >
-      <Box sx={{ width: 420, maxWidth: "92vw" }}>
+      {/* Header */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 3,
+        }}
+      >
         <Typography
           variant="h5"
-          sx={{
-            textAlign: "center",
-            mb: 2,
-            fontWeight: 700,
-            color: "text.primary",
-          }}
+          sx={{ fontWeight: 700, color: "text.primary" }}
         >
           {loading
             ? "Loading..."
@@ -53,10 +55,10 @@ const Index = () => {
         </Typography>
         <Button
           onClick={onLogout}
-          fullWidth
           variant="contained"
           sx={{
-            py: 1.5,
+            py: 1,
+            px: 3,
             borderRadius: 2,
             fontWeight: 700,
             textTransform: "none",
@@ -66,21 +68,49 @@ const Index = () => {
         </Button>
       </Box>
 
-      <Elements stripe={stripePromise}>
+      {/* Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 3 }}>
+        <Tabs
+          value={tabValue}
+          onChange={(e, newValue) => setTabValue(newValue)}
+        >
+          <Tab label="Tasks" />
+          <Tab label="Payment" />
+        </Tabs>
+      </Box>
+
+      {/* Tab Content */}
+      {tabValue === 0 && (
+        <Box sx={{ maxWidth: 1200, mx: "auto", width: "100%" }}>
+          <TodoApp />
+        </Box>
+      )}
+
+      {tabValue === 1 && (
         <Box
           sx={{
-            width: 420,
-            maxWidth: "92vw",
-            border: 1,
-            borderColor: "divider",
-            borderRadius: 2,
-            p: 2,
-            bgcolor: "background.paper",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
           }}
         >
-          <CheckoutForm />
+          <Elements stripe={stripePromise}>
+            <Box
+              sx={{
+                width: 420,
+                maxWidth: "92vw",
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 2,
+                p: 2,
+                bgcolor: "background.paper",
+              }}
+            >
+              <CheckoutForm />
+            </Box>
+          </Elements>
         </Box>
-      </Elements>
+      )}
     </Box>
   );
 };
