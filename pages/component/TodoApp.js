@@ -28,6 +28,8 @@ export default function TodoApp() {
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editingTodo, setEditingTodo] = useState(null);
+  const [notificationPermission, setNotificationPermission] =
+    useState("default");
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -52,63 +54,115 @@ export default function TodoApp() {
 
   // Check for scheduled todos and show notifications
   useEffect(() => {
+    if (todos.length === 0) return;
+
     const checkNotifications = async () => {
       const now = new Date();
+      const todosToNotify = [];
+
       for (const todo of todos) {
-        if (
-          todo.scheduledAt &&
-          !todo.completed &&
-          !todo.notified &&
-          new Date(todo.scheduledAt) <= now
-        ) {
-          showNotification(todo);
-          // Mark as notified in database
-          try {
-            await axios.put(
-              "/api/todos",
-              { id: todo.id, notified: true },
-              { withCredentials: true }
-            );
-            fetchTodos(); // Refresh to update notified status
-          } catch (error) {
-            console.error("Error marking todo as notified:", error);
+        if (todo.scheduledAt && !todo.completed && !todo.notified) {
+          const scheduledTime = new Date(todo.scheduledAt);
+          // Check if scheduled time has arrived (within 1 minute tolerance)
+          const timeDiff = scheduledTime.getTime() - now.getTime();
+
+          if (timeDiff <= 60000 && timeDiff >= -60000) {
+            // Within 1 minute of scheduled time
+            todosToNotify.push(todo);
           }
         }
       }
+
+      // Show notifications and mark as notified
+      for (const todo of todosToNotify) {
+        showNotification(todo);
+        try {
+          await axios.put(
+            "/api/todos",
+            { id: todo.id, notified: true },
+            { withCredentials: true }
+          );
+        } catch (error) {
+          console.error("Error marking todo as notified:", error);
+        }
+      }
+
+      // Refresh todos if any were notified
+      if (todosToNotify.length > 0) {
+        fetchTodos();
+      }
     };
 
-    const interval = setInterval(checkNotifications, 60000); // Check every minute
+    // Check every 30 seconds for more accurate notifications
+    const interval = setInterval(checkNotifications, 30000);
     checkNotifications(); // Check immediately
 
     return () => clearInterval(interval);
   }, [todos, fetchTodos]);
 
-  // Request notification permission
+  // Check notification permission status
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
     }
   }, []);
 
+  const requestNotificationPermission = async () => {
+    if ("Notification" in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === "granted") {
+        alert(
+          "Notifications enabled! You'll receive reminders for scheduled tasks."
+        );
+      }
+    }
+  };
+
   const showNotification = (todo) => {
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(`Task Reminder: ${todo.title}`, {
-        body: todo.description || "Time to complete this task!",
-        icon: "/favicon.ico",
-        tag: `todo-${todo.id}`,
-      });
+    if ("Notification" in window) {
+      if (Notification.permission === "granted") {
+        new Notification(`Task Reminder: ${todo.title}`, {
+          body: todo.description || "Time to complete this task!",
+          icon: "/favicon.ico",
+          tag: `todo-${todo.id}`,
+          requireInteraction: true, // Keep notification until user interacts
+        });
+      } else if (Notification.permission === "default") {
+        // Request permission if not yet requested
+        Notification.requestPermission().then((permission) => {
+          if (permission === "granted") {
+            new Notification(`Task Reminder: ${todo.title}`, {
+              body: todo.description || "Time to complete this task!",
+              icon: "/favicon.ico",
+              tag: `todo-${todo.id}`,
+              requireInteraction: true,
+            });
+          }
+        });
+      }
     }
   };
 
   const handleOpenDialog = (todo = null) => {
     if (todo) {
       setEditingTodo(todo);
+      // Convert scheduledAt to local datetime format for editing
+      let scheduledAtValue = "";
+      if (todo.scheduledAt) {
+        const date = new Date(todo.scheduledAt);
+        // Format as YYYY-MM-DDTHH:mm for datetime-local input
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const hours = String(date.getHours()).padStart(2, "0");
+        const minutes = String(date.getMinutes()).padStart(2, "0");
+        scheduledAtValue = `${year}-${month}-${day}T${hours}:${minutes}`;
+      }
       setFormData({
         title: todo.title,
         description: todo.description || "",
-        scheduledAt: todo.scheduledAt
-          ? new Date(todo.scheduledAt).toISOString().slice(0, 16)
-          : "",
+        scheduledAt: scheduledAtValue,
       });
     } else {
       setEditingTodo(null);
@@ -127,11 +181,20 @@ export default function TodoApp() {
     e.preventDefault();
     try {
       if (editingTodo) {
-        await axios.put(
-          "/api/todos",
-          { ...formData, id: editingTodo.id },
-          { withCredentials: true }
-        );
+        // Compare old and new scheduledAt values
+        const oldScheduledAt = editingTodo.scheduledAt
+          ? new Date(editingTodo.scheduledAt).toISOString().slice(0, 16)
+          : "";
+        const newScheduledAt = formData.scheduledAt || "";
+
+        const updateData = { ...formData, id: editingTodo.id };
+
+        // Reset notified if scheduledAt changed or was cleared
+        if (oldScheduledAt !== newScheduledAt) {
+          updateData.notified = false; // Reset notification when schedule changes
+        }
+
+        await axios.put("/api/todos", updateData, { withCredentials: true });
       } else {
         await axios.post("/api/todos", formData, { withCredentials: true });
       }
@@ -139,7 +202,9 @@ export default function TodoApp() {
       handleCloseDialog();
     } catch (error) {
       console.error("Error saving todo:", error);
-      alert("Error saving todo");
+      alert(
+        "Error saving todo: " + (error.response?.data?.error || error.message)
+      );
     }
   };
 
@@ -189,18 +254,32 @@ export default function TodoApp() {
           justifyContent: "space-between",
           alignItems: "center",
           mb: 2,
+          flexWrap: "wrap",
+          gap: 2,
         }}
       >
         <Typography variant="h5" fontWeight={700}>
           My Tasks
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Icon icon="solar:add-circle-bold" width={20} />}
-          onClick={() => handleOpenDialog()}
-        >
-          Add Task
-        </Button>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          {notificationPermission !== "granted" && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<Icon icon="solar:bell-bold" width={18} />}
+              onClick={requestNotificationPermission}
+            >
+              Enable Notifications
+            </Button>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<Icon icon="solar:add-circle-bold" width={20} />}
+            onClick={() => handleOpenDialog()}
+          >
+            Add Task
+          </Button>
+        </Box>
       </Box>
 
       {todos.length === 0 ? (
