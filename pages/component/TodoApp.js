@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Card,
@@ -19,17 +19,24 @@ import {
   Chip,
   Stack,
   Alert,
+  Grid,
+  LinearProgress,
+  Paper,
+  Divider,
 } from "@mui/material";
 import { Icon } from "@iconify/react";
 import axios from "axios";
+import { useTheme } from "../context/ThemeContext";
 
 export default function TodoApp() {
+  const { theme } = useTheme();
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editingTodo, setEditingTodo] = useState(null);
   const [notificationPermission, setNotificationPermission] =
     useState("default");
+  const [viewMode, setViewMode] = useState("tasks"); // 'tasks' or 'analytics'
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -52,6 +59,51 @@ export default function TodoApp() {
     fetchTodos();
   }, [fetchTodos]);
 
+  // Analytics calculations
+  const analytics = useMemo(() => {
+    const total = todos.length;
+    const completed = todos.filter((t) => t.completed).length;
+    const pending = total - completed;
+    const completionRate = total > 0 ? (completed / total) * 100 : 0;
+    const overdue = todos.filter(
+      (t) =>
+        t.scheduledAt && !t.completed && new Date(t.scheduledAt) < new Date()
+    ).length;
+    const scheduled = todos.filter((t) => t.scheduledAt && !t.completed).length;
+
+    // Weekly completion data (last 7 days)
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - i));
+      date.setHours(0, 0, 0, 0);
+      return date;
+    });
+
+    const weeklyData = last7Days.map((date) => {
+      const dayTodos = todos.filter((todo) => {
+        if (!todo.createdAt) return false;
+        const todoDate = new Date(todo.createdAt);
+        todoDate.setHours(0, 0, 0, 0);
+        return todoDate.getTime() === date.getTime();
+      });
+      return {
+        date: date.toLocaleDateString("en-US", { weekday: "short" }),
+        created: dayTodos.length,
+        completed: dayTodos.filter((t) => t.completed).length,
+      };
+    });
+
+    return {
+      total,
+      completed,
+      pending,
+      completionRate,
+      overdue,
+      scheduled,
+      weeklyData,
+    };
+  }, [todos]);
+
   // Check for scheduled todos and show notifications
   useEffect(() => {
     if (todos.length === 0) return;
@@ -63,17 +115,14 @@ export default function TodoApp() {
       for (const todo of todos) {
         if (todo.scheduledAt && !todo.completed && !todo.notified) {
           const scheduledTime = new Date(todo.scheduledAt);
-          // Check if scheduled time has arrived (within 1 minute tolerance)
           const timeDiff = scheduledTime.getTime() - now.getTime();
 
           if (timeDiff <= 60000 && timeDiff >= -60000) {
-            // Within 1 minute of scheduled time
             todosToNotify.push(todo);
           }
         }
       }
 
-      // Show notifications and mark as notified
       for (const todo of todosToNotify) {
         showNotification(todo);
         try {
@@ -87,15 +136,13 @@ export default function TodoApp() {
         }
       }
 
-      // Refresh todos if any were notified
       if (todosToNotify.length > 0) {
         fetchTodos();
       }
     };
 
-    // Check every 30 seconds for more accurate notifications
     const interval = setInterval(checkNotifications, 30000);
-    checkNotifications(); // Check immediately
+    checkNotifications();
 
     return () => clearInterval(interval);
   }, [todos, fetchTodos]);
@@ -126,10 +173,9 @@ export default function TodoApp() {
           body: todo.description || "Time to complete this task!",
           icon: "/favicon.ico",
           tag: `todo-${todo.id}`,
-          requireInteraction: true, // Keep notification until user interacts
+          requireInteraction: true,
         });
       } else if (Notification.permission === "default") {
-        // Request permission if not yet requested
         Notification.requestPermission().then((permission) => {
           if (permission === "granted") {
             new Notification(`Task Reminder: ${todo.title}`, {
@@ -147,11 +193,9 @@ export default function TodoApp() {
   const handleOpenDialog = (todo = null) => {
     if (todo) {
       setEditingTodo(todo);
-      // Convert scheduledAt to local datetime format for editing
       let scheduledAtValue = "";
       if (todo.scheduledAt) {
         const date = new Date(todo.scheduledAt);
-        // Format as YYYY-MM-DDTHH:mm for datetime-local input
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, "0");
         const day = String(date.getDate()).padStart(2, "0");
@@ -181,7 +225,6 @@ export default function TodoApp() {
     e.preventDefault();
     try {
       if (editingTodo) {
-        // Compare old and new scheduledAt values
         const oldScheduledAt = editingTodo.scheduledAt
           ? new Date(editingTodo.scheduledAt).toISOString().slice(0, 16)
           : "";
@@ -189,9 +232,8 @@ export default function TodoApp() {
 
         const updateData = { ...formData, id: editingTodo.id };
 
-        // Reset notified if scheduledAt changed or was cleared
         if (oldScheduledAt !== newScheduledAt) {
-          updateData.notified = false; // Reset notification when schedule changes
+          updateData.notified = false;
         }
 
         await axios.put("/api/todos", updateData, { withCredentials: true });
@@ -242,26 +284,145 @@ export default function TodoApp() {
     return new Date(scheduledAt) < new Date();
   };
 
+  // Chart component for weekly data
+  const WeeklyChart = () => {
+    const maxValue = Math.max(
+      ...analytics.weeklyData.map((d) => Math.max(d.created, d.completed)),
+      1
+    );
+
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Weekly Activity
+        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 1,
+            height: 200,
+            mt: 2,
+          }}
+        >
+          {analytics.weeklyData.map((day, index) => (
+            <Box
+              key={index}
+              sx={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 0.5,
+              }}
+            >
+              <Box
+                sx={{
+                  width: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-end",
+                  height: "100%",
+                  gap: 0.5,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: "100%",
+                    height: `${(day.created / maxValue) * 100}%`,
+                    bgcolor: "primary.main",
+                    borderRadius: "4px 4px 0 0",
+                    minHeight: day.created > 0 ? "4px" : "0",
+                    transition: "all 0.3s ease",
+                  }}
+                  title={`Created: ${day.created}`}
+                />
+                <Box
+                  sx={{
+                    width: "100%",
+                    height: `${(day.completed / maxValue) * 100}%`,
+                    bgcolor: "success.main",
+                    borderRadius: "0 0 4px 4px",
+                    minHeight: day.completed > 0 ? "4px" : "0",
+                    transition: "all 0.3s ease",
+                  }}
+                  title={`Completed: ${day.completed}`}
+                />
+              </Box>
+              <Typography variant="caption" sx={{ fontSize: "0.7rem" }}>
+                {day.date}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+        <Box sx={{ display: "flex", gap: 2, justifyContent: "center", mt: 2 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Box
+              sx={{
+                width: 12,
+                height: 12,
+                bgcolor: "primary.main",
+                borderRadius: 1,
+              }}
+            />
+            <Typography variant="caption">Created</Typography>
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Box
+              sx={{
+                width: 12,
+                height: 12,
+                bgcolor: "success.main",
+                borderRadius: 1,
+              }}
+            />
+            <Typography variant="caption">Completed</Typography>
+          </Box>
+        </Box>
+      </Box>
+    );
+  };
+
   if (loading) {
-    return <Typography>Loading todos...</Typography>;
+    return (
+      <Box sx={{ textAlign: "center", py: 4 }}>
+        <Typography>Loading todos...</Typography>
+        <LinearProgress sx={{ mt: 2 }} />
+      </Box>
+    );
   }
 
   return (
-    <Box sx={{ width: "100%", maxWidth: 600, mx: "auto" }}>
+    <Box sx={{ width: "100%" }}>
+      {/* Header with View Toggle */}
       <Box
         sx={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          mb: 2,
+          mb: 3,
           flexWrap: "wrap",
           gap: 2,
         }}
       >
-        <Typography variant="h5" fontWeight={700}>
-          My Tasks
+        <Typography variant="h4" fontWeight={700}>
+          Task Manager
         </Typography>
-        <Box sx={{ display: "flex", gap: 1 }}>
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+          <Button
+            variant={viewMode === "tasks" ? "contained" : "outlined"}
+            onClick={() => setViewMode("tasks")}
+            startIcon={<Icon icon="solar:list-check-bold" width={20} />}
+          >
+            Tasks
+          </Button>
+          <Button
+            variant={viewMode === "analytics" ? "contained" : "outlined"}
+            onClick={() => setViewMode("analytics")}
+            startIcon={<Icon icon="solar:chart-2-bold" width={20} />}
+          >
+            Analytics
+          </Button>
           {notificationPermission !== "granted" && (
             <Button
               variant="outlined"
@@ -282,118 +443,337 @@ export default function TodoApp() {
         </Box>
       </Box>
 
-      {todos.length === 0 ? (
-        <Card>
-          <CardContent>
-            <Typography textAlign="center" color="text.secondary">
-              No tasks yet. Create your first task!
-            </Typography>
-          </CardContent>
-        </Card>
-      ) : (
-        <List>
-          {todos.map((todo) => {
-            const overdue = isOverdue(todo.scheduledAt, todo.completed);
-            return (
-              <Card
-                key={todo.id}
-                sx={{
-                  mb: 1,
-                  border: overdue ? 2 : 1,
-                  borderColor: overdue ? "error.main" : "divider",
-                  bgcolor:
-                    overdue && !todo.completed
-                      ? "error.light"
-                      : "background.paper",
-                }}
-              >
-                <ListItem>
-                  <Checkbox
-                    checked={todo.completed}
-                    onChange={() => handleToggleComplete(todo)}
+      {viewMode === "analytics" ? (
+        <Grid container spacing={3}>
+          {/* Stats Cards */}
+          <Grid item xs={12} sm={6} md={3}>
+            <Card
+              sx={{
+                background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                color: "white",
+              }}
+            >
+              <CardContent>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Icon icon="solar:clipboard-list-bold" width={32} />
+                  <Typography variant="h6">Total Tasks</Typography>
+                </Box>
+                <Typography variant="h3" sx={{ mt: 1, fontWeight: 700 }}>
+                  {analytics.total}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card
+              sx={{
+                background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                color: "white",
+              }}
+            >
+              <CardContent>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Icon icon="solar:check-circle-bold" width={32} />
+                  <Typography variant="h6">Completed</Typography>
+                </Box>
+                <Typography variant="h3" sx={{ mt: 1, fontWeight: 700 }}>
+                  {analytics.completed}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card
+              sx={{
+                background: `linear-gradient(135deg, ${theme.palette.warning.main} 0%, ${theme.palette.warning.dark} 100%)`,
+                color: "white",
+              }}
+            >
+              <CardContent>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Icon icon="solar:clock-circle-bold" width={32} />
+                  <Typography variant="h6">Pending</Typography>
+                </Box>
+                <Typography variant="h3" sx={{ mt: 1, fontWeight: 700 }}>
+                  {analytics.pending}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <Card
+              sx={{
+                background: `linear-gradient(135deg, ${theme.palette.error.main} 0%, ${theme.palette.error.dark} 100%)`,
+                color: "white",
+              }}
+            >
+              <CardContent>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Icon icon="solar:calendar-mark-bold" width={32} />
+                  <Typography variant="h6">Overdue</Typography>
+                </Box>
+                <Typography variant="h3" sx={{ mt: 1, fontWeight: 700 }}>
+                  {analytics.overdue}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Completion Rate */}
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Completion Rate
+                </Typography>
+                <Box sx={{ mt: 2 }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      mb: 1,
+                    }}
+                  >
+                    <Typography variant="body2" color="text.secondary">
+                      Progress
+                    </Typography>
+                    <Typography variant="h6" fontWeight={700}>
+                      {analytics.completionRate.toFixed(1)}%
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={analytics.completionRate}
+                    sx={{
+                      height: 12,
+                      borderRadius: 6,
+                      bgcolor: "action.hover",
+                      "& .MuiLinearProgress-bar": {
+                        borderRadius: 6,
+                        background: `linear-gradient(90deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                      },
+                    }}
                   />
-                  <ListItemText
-                    primary={
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Scheduled Tasks */}
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Scheduled Tasks
+                </Typography>
+                <Typography variant="h3" sx={{ mt: 2, fontWeight: 700 }}>
+                  {analytics.scheduled}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 1 }}
+                >
+                  Tasks with scheduled dates
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Weekly Chart */}
+          <Grid item xs={12}>
+            <Card>
+              <CardContent>
+                <WeeklyChart />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      ) : (
+        <>
+          {todos.length === 0 ? (
+            <Card
+              sx={{
+                textAlign: "center",
+                py: 6,
+                background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.action.hover} 100%)`,
+              }}
+            >
+              <CardContent>
+                <Icon
+                  icon="solar:clipboard-list-bold"
+                  width={64}
+                  style={{ opacity: 0.5, marginBottom: 16 }}
+                />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  No tasks yet
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 3 }}
+                >
+                  Create your first task to get started!
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<Icon icon="solar:add-circle-bold" width={20} />}
+                  onClick={() => handleOpenDialog()}
+                >
+                  Create Task
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Grid container spacing={2}>
+              {todos.map((todo) => {
+                const overdue = isOverdue(todo.scheduledAt, todo.completed);
+                return (
+                  <Grid item xs={12} sm={6} md={4} key={todo.id}>
+                    <Card
+                      sx={{
+                        height: "100%",
+                        border: overdue ? 2 : 1,
+                        borderColor: overdue ? "error.main" : "divider",
+                        bgcolor:
+                          overdue && !todo.completed
+                            ? "error.light"
+                            : "background.paper",
+                        transition: "all 0.2s ease",
+                        "&:hover": {
+                          boxShadow: 4,
+                          transform: "translateY(-2px)",
+                        },
+                      }}
+                    >
+                      <ListItem>
+                        <Checkbox
+                          checked={todo.completed}
+                          onChange={() => handleToggleComplete(todo)}
+                          sx={{ mr: 1 }}
+                        />
+                        <ListItemText
+                          primary={
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 1,
+                                flexWrap: "wrap",
+                                mb: 0.5,
+                              }}
+                            >
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  textDecoration: todo.completed
+                                    ? "line-through"
+                                    : "none",
+                                  color: todo.completed
+                                    ? "text.secondary"
+                                    : overdue
+                                    ? "error.main"
+                                    : "text.primary",
+                                  fontWeight:
+                                    overdue && !todo.completed ? 700 : 500,
+                                }}
+                              >
+                                {todo.title}
+                              </Typography>
+                            </Box>
+                          }
+                          secondary={
+                            <Box sx={{ mt: 1 }}>
+                              {todo.description && (
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                  sx={{ mb: 1 }}
+                                >
+                                  {todo.description}
+                                </Typography>
+                              )}
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  gap: 1,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {todo.scheduledAt && (
+                                  <Chip
+                                    label={formatDate(todo.scheduledAt)}
+                                    size="small"
+                                    color={
+                                      isOverdue(
+                                        todo.scheduledAt,
+                                        todo.completed
+                                      )
+                                        ? "error"
+                                        : "primary"
+                                    }
+                                    icon={
+                                      <Icon
+                                        icon="solar:calendar-bold"
+                                        width={14}
+                                        height={14}
+                                      />
+                                    }
+                                  />
+                                )}
+                                {todo.completed && (
+                                  <Chip
+                                    label="Completed"
+                                    size="small"
+                                    color="success"
+                                    icon={
+                                      <Icon
+                                        icon="solar:check-circle-bold"
+                                        width={14}
+                                        height={14}
+                                      />
+                                    }
+                                  />
+                                )}
+                              </Box>
+                            </Box>
+                          }
+                        />
+                      </ListItem>
+                      <Divider />
                       <Box
                         sx={{
                           display: "flex",
-                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          p: 1,
                           gap: 1,
-                          flexWrap: "wrap",
                         }}
                       >
-                        <Typography
-                          sx={{
-                            textDecoration: todo.completed
-                              ? "line-through"
-                              : "none",
-                            color: todo.completed
-                              ? "text.secondary"
-                              : overdue
-                              ? "error.main"
-                              : "text.primary",
-                            fontWeight: overdue && !todo.completed ? 700 : 400,
-                          }}
+                        <IconButton
+                          size="small"
+                          onClick={() => handleOpenDialog(todo)}
+                          color="primary"
                         >
-                          {todo.title}
-                        </Typography>
-                        {todo.scheduledAt && (
-                          <Chip
-                            label={formatDate(todo.scheduledAt)}
-                            size="small"
-                            color={
-                              isOverdue(todo.scheduledAt, todo.completed)
-                                ? "error"
-                                : "primary"
-                            }
-                            icon={
-                              <Icon
-                                icon="solar:calendar-bold"
-                                width={16}
-                                height={16}
-                              />
-                            }
-                          />
-                        )}
-                        {todo.completed && (
-                          <Chip
-                            label="Completed"
-                            size="small"
-                            color="success"
-                            icon={
-                              <Icon
-                                icon="solar:check-circle-bold"
-                                width={16}
-                                height={16}
-                              />
-                            }
-                          />
-                        )}
+                          <Icon icon="solar:pen-bold" width={18} />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDelete(todo.id)}
+                          color="error"
+                        >
+                          <Icon icon="solar:trash-bin-trash-bold" width={18} />
+                        </IconButton>
                       </Box>
-                    }
-                    secondary={todo.description}
-                  />
-                  <ListItemSecondaryAction>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleOpenDialog(todo)}
-                      sx={{ mr: 1 }}
-                    >
-                      <Icon icon="solar:pen-bold" width={20} />
-                    </IconButton>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleDelete(todo.id)}
-                      color="error"
-                    >
-                      <Icon icon="solar:trash-bin-trash-bold" width={20} />
-                    </IconButton>
-                  </ListItemSecondaryAction>
-                </ListItem>
-              </Card>
-            );
-          })}
-        </List>
+                    </Card>
+                  </Grid>
+                );
+              })}
+            </Grid>
+          )}
+        </>
       )}
 
       <Dialog
@@ -401,9 +781,14 @@ export default function TodoApp() {
         onClose={handleCloseDialog}
         maxWidth="sm"
         fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+          },
+        }}
       >
         <form onSubmit={handleSubmit}>
-          <DialogTitle>
+          <DialogTitle sx={{ pb: 1 }}>
             {editingTodo ? "Edit Task" : "Create New Task"}
           </DialogTitle>
           <DialogContent>
@@ -416,6 +801,7 @@ export default function TodoApp() {
                 onChange={(e) =>
                   setFormData({ ...formData, title: e.target.value })
                 }
+                autoFocus
               />
               <TextField
                 label="Description"
@@ -438,13 +824,16 @@ export default function TodoApp() {
                 InputLabelProps={{ shrink: true }}
               />
               {formData.scheduledAt && (
-                <Alert severity="info">
+                <Alert
+                  severity="info"
+                  icon={<Icon icon="solar:bell-bold" width={20} />}
+                >
                   You&apos;ll receive a notification when this time arrives
                 </Alert>
               )}
             </Stack>
           </DialogContent>
-          <DialogActions>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
             <Button onClick={handleCloseDialog}>Cancel</Button>
             <Button type="submit" variant="contained">
               {editingTodo ? "Update" : "Create"}
