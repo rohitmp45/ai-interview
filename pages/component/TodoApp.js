@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Box,
   Card,
@@ -54,6 +54,10 @@ export default function TodoApp() {
     description: "",
     scheduledAt: "",
   });
+  const recognitionRef = useRef(null);
+  const currentFieldRef = useRef(null); // 'title' | 'description' or null
+  const [listeningField, setListeningField] = useState(null);
+  const [liveTranscript, setLiveTranscript] = useState("");
 
   // Fetch todos
   const fetchTodos = useCallback(async () => {
@@ -332,6 +336,84 @@ export default function TodoApp() {
       );
     }
   };
+
+  // Speech-to-text using native Web Speech API; target 'title' or 'description'
+  const toggleListeningForField = (field) => {
+    if (typeof window === "undefined") return alert("Speech not supported");
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return alert("SpeechRecognition not supported in this browser");
+
+    let recognition = recognitionRef.current;
+
+    if (!recognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event) => {
+        let interim = "";
+        let final = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const res = event.results[i];
+          if (res.isFinal) final += res[0].transcript;
+          else interim += res[0].transcript;
+        }
+        const text = (final || interim).trim();
+        setLiveTranscript(text);
+        const target = currentFieldRef.current;
+        if (target) {
+          setFormData((prev) => ({ ...prev, [target]: text }));
+        }
+      };
+
+      recognition.onerror = () => {
+        try {
+          recognition.stop();
+        } catch (e) {}
+        setListeningField(null);
+        currentFieldRef.current = null;
+      };
+
+      recognition.onend = () => {
+        setListeningField(null);
+        currentFieldRef.current = null;
+      };
+
+      recognitionRef.current = recognition;
+    }
+
+    // toggle behaviour: start if not listening, stop if listening same field
+    if (listeningField !== field) {
+      currentFieldRef.current = field;
+      setLiveTranscript("");
+      try {
+        recognitionRef.current.start();
+        setListeningField(field);
+      } catch (e) {
+        // ignore repeated starts
+      }
+    } else {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      setListeningField(null);
+      currentFieldRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      const rec = recognitionRef.current;
+      if (rec) {
+        try {
+          rec.stop();
+        } catch (e) {}
+      }
+    };
+  }, []);
 
   const handleToggleComplete = async (todo) => {
     try {
@@ -1210,16 +1292,27 @@ export default function TodoApp() {
           </DialogTitle>
           <DialogContent>
             <Stack spacing={2} sx={{ mt: 1 }}>
-              <TextField
-                label="Title"
-                fullWidth
-                required
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                autoFocus
-              />
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                <TextField
+                  label="Title"
+                  required
+                  value={formData.title}
+                  onChange={(e) =>
+                    setFormData({ ...formData, title: e.target.value })
+                  }
+                  autoFocus
+                  sx={{ flex: 1 }}
+                />
+                <Button
+                  variant={listeningField === "title" ? "contained" : "outlined"}
+                  color={listeningField === "title" ? "error" : "primary"}
+                  onClick={() => toggleListeningForField("title")}
+                  startIcon={<Icon icon={listeningField === "title" ? "ic:baseline-mic" : "ic:baseline-mic-none"} />}
+                  sx={{ textTransform: "none", height: 40 }}
+                >
+                  {listeningField === "title" ? "Stop" : "Voice"}
+                </Button>
+              </Box>
               <TextField
                 label="Description"
                 fullWidth
@@ -1230,6 +1323,21 @@ export default function TodoApp() {
                   setFormData({ ...formData, description: e.target.value })
                 }
               />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Button
+                  variant={listeningField === "description" ? "contained" : "outlined"}
+                  color={listeningField === "description" ? "error" : "primary"}
+                  onClick={() => toggleListeningForField("description")}
+                  startIcon={<Icon icon={listeningField === "description" ? "ic:baseline-mic" : "ic:baseline-mic-none"} />}
+                  sx={{ textTransform: "none" }}
+                >
+                  {listeningField === "description" ? "Stop" : "Voice Note"}
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  {listeningField ? (liveTranscript ? `Live: ${liveTranscript}` : "Listening...") : (formData.description ? "Description set" : "No speech")}
+                </Typography>
+                
+              </Box>
               <TextField
                 label="Schedule Date & Time"
                 type="datetime-local"

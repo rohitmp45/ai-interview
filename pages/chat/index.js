@@ -9,6 +9,7 @@ import { Elements } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { Box, Typography, Button, Tabs, Tab } from "@mui/material";
 import { Icon } from "@iconify/react";
+import VoiceTitle from "../../component/VoiceTitle";
 
 const Index = () => {
   const { user, loading, fetchMe, logout } = useUser();
@@ -58,28 +59,31 @@ const Index = () => {
             gap: 2,
           }}
         >
-          <Typography
-            variant="h5"
-            sx={{ fontWeight: 700, color: "text.primary" }}
-          >
-            {loading
-              ? "Loading..."
-              : `Welcome back, ${user?.name || user?.email || "User"}`}
-          </Typography>
-          <Button
-            onClick={onLogout}
-            variant="contained"
-            startIcon={<Icon icon="solar:logout-2-bold" width={20} />}
-            sx={{
-              py: 1,
-              px: 3,
-              borderRadius: 2,
-              fontWeight: 700,
-              textTransform: "none",
-            }}
-          >
-            Logout
-          </Button>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <Typography
+                variant="h5"
+                sx={{ fontWeight: 700, color: "text.primary" }}
+              >
+                {loading
+                  ? "Loading..."
+                  : `Welcome back, ${user?.name || user?.email || "User"}`}
+              </Typography>
+              <VoiceTitle />
+            </Box>
+            <Button
+              onClick={onLogout}
+              variant="contained"
+              startIcon={<Icon icon="solar:logout-2-bold" width={20} />}
+              sx={{
+                py: 1,
+                px: 3,
+                borderRadius: 2,
+                fontWeight: 700,
+                textTransform: "none",
+              }}
+            >
+              Logout
+            </Button>
         </Box>
 
         {/* Tabs */}
