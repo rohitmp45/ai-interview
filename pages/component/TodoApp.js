@@ -23,6 +23,12 @@ import {
   LinearProgress,
   Paper,
   Divider,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import { Icon } from "@iconify/react";
 import axios from "axios";
@@ -37,6 +43,12 @@ export default function TodoApp() {
   const [notificationPermission, setNotificationPermission] =
     useState("default");
   const [viewMode, setViewMode] = useState("tasks"); // 'tasks' or 'analytics'
+  const [chartFilter, setChartFilter] = useState("7days"); // '7days', '30days', 'custom'
+  const [taskFilter, setTaskFilter] = useState("all"); // 'all', 'scheduled', 'completed', 'pending', 'overdue'
+  const [customDateRange, setCustomDateRange] = useState({
+    start: "",
+    end: "",
+  });
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -59,6 +71,36 @@ export default function TodoApp() {
     fetchTodos();
   }, [fetchTodos]);
 
+  // Filtered todos based on task filter
+  const filteredTodos = useMemo(() => {
+    let filtered = [...todos];
+
+    switch (taskFilter) {
+      case "scheduled":
+        filtered = filtered.filter((t) => t.scheduledAt && !t.completed);
+        break;
+      case "completed":
+        filtered = filtered.filter((t) => t.completed);
+        break;
+      case "pending":
+        filtered = filtered.filter((t) => !t.completed && !t.scheduledAt);
+        break;
+      case "overdue":
+        filtered = filtered.filter(
+          (t) =>
+            t.scheduledAt &&
+            !t.completed &&
+            new Date(t.scheduledAt) < new Date()
+        );
+        break;
+      default:
+        // 'all' - no filter
+        break;
+    }
+
+    return filtered;
+  }, [todos, taskFilter]);
+
   // Analytics calculations
   const analytics = useMemo(() => {
     const total = todos.length;
@@ -71,25 +113,66 @@ export default function TodoApp() {
     ).length;
     const scheduled = todos.filter((t) => t.scheduledAt && !t.completed).length;
 
-    // Weekly completion data (last 7 days)
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (6 - i));
+    // Chart data based on filter
+    let daysToShow = 7;
+    let startDate = new Date();
+
+    if (chartFilter === "30days") {
+      daysToShow = 30;
+      startDate.setDate(startDate.getDate() - 29);
+    } else if (
+      chartFilter === "custom" &&
+      customDateRange.start &&
+      customDateRange.end
+    ) {
+      startDate = new Date(customDateRange.start);
+      const endDate = new Date(customDateRange.end);
+      daysToShow = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    } else {
+      // Default 7 days
+      startDate.setDate(startDate.getDate() - 6);
+    }
+
+    const dateRange = Array.from({ length: daysToShow }, (_, i) => {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
       date.setHours(0, 0, 0, 0);
       return date;
     });
 
-    const weeklyData = last7Days.map((date) => {
+    const chartData = dateRange.map((date) => {
       const dayTodos = todos.filter((todo) => {
         if (!todo.createdAt) return false;
         const todoDate = new Date(todo.createdAt);
         todoDate.setHours(0, 0, 0, 0);
         return todoDate.getTime() === date.getTime();
       });
+
+      const dayCompleted = todos.filter((todo) => {
+        if (!todo.completed || !todo.updatedAt) return false;
+        const todoDate = new Date(todo.updatedAt);
+        todoDate.setHours(0, 0, 0, 0);
+        return todoDate.getTime() === date.getTime() && todo.completed;
+      });
+
       return {
-        date: date.toLocaleDateString("en-US", { weekday: "short" }),
+        date: date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        }),
+        fullDate: date.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }),
         created: dayTodos.length,
-        completed: dayTodos.filter((t) => t.completed).length,
+        completed: dayCompleted.length,
+        scheduled: todos.filter((todo) => {
+          if (!todo.scheduledAt) return false;
+          const todoDate = new Date(todo.scheduledAt);
+          todoDate.setHours(0, 0, 0, 0);
+          return todoDate.getTime() === date.getTime();
+        }).length,
       };
     });
 
@@ -100,9 +183,9 @@ export default function TodoApp() {
       completionRate,
       overdue,
       scheduled,
-      weeklyData,
+      chartData,
     };
-  }, [todos]);
+  }, [todos, chartFilter, customDateRange]);
 
   // Check for scheduled todos and show notifications
   useEffect(() => {
@@ -284,32 +367,89 @@ export default function TodoApp() {
     return new Date(scheduledAt) < new Date();
   };
 
-  // Chart component for weekly data
+  // Enhanced Chart component with filters
   const WeeklyChart = () => {
     const maxValue = Math.max(
-      ...analytics.weeklyData.map((d) => Math.max(d.created, d.completed)),
+      ...analytics.chartData.map((d) =>
+        Math.max(d.created, d.completed, d.scheduled)
+      ),
       1
     );
 
     return (
       <Box sx={{ mt: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          Weekly Activity
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 2,
+            flexWrap: "wrap",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6">Activity Chart</Typography>
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+            <ToggleButtonGroup
+              value={chartFilter}
+              exclusive
+              onChange={(e, newValue) => {
+                if (newValue !== null) setChartFilter(newValue);
+              }}
+              size="small"
+            >
+              <ToggleButton value="7days">7 Days</ToggleButton>
+              <ToggleButton value="30days">30 Days</ToggleButton>
+              <ToggleButton value="custom">Custom</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        </Box>
+
+        {chartFilter === "custom" && (
+          <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap" }}>
+            <TextField
+              label="Start Date"
+              type="date"
+              size="small"
+              value={customDateRange.start}
+              onChange={(e) =>
+                setCustomDateRange({
+                  ...customDateRange,
+                  start: e.target.value,
+                })
+              }
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="End Date"
+              type="date"
+              size="small"
+              value={customDateRange.end}
+              onChange={(e) =>
+                setCustomDateRange({ ...customDateRange, end: e.target.value })
+              }
+              InputLabelProps={{ shrink: true }}
+            />
+          </Box>
+        )}
+
         <Box
           sx={{
             display: "flex",
             alignItems: "flex-end",
-            gap: 1,
-            height: 200,
+            gap: 0.5,
+            height: 250,
             mt: 2,
+            overflowX: "auto",
+            pb: 1,
           }}
         >
-          {analytics.weeklyData.map((day, index) => (
+          {analytics.chartData.map((day, index) => (
             <Box
               key={index}
               sx={{
                 flex: 1,
+                minWidth: 60,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -324,32 +464,99 @@ export default function TodoApp() {
                   justifyContent: "flex-end",
                   height: "100%",
                   gap: 0.5,
+                  cursor: "pointer",
+                  "&:hover": {
+                    opacity: 0.8,
+                  },
+                }}
+                title={`${day.fullDate}\nCreated: ${day.created}\nCompleted: ${day.completed}\nScheduled: ${day.scheduled}`}
+              >
+                {day.created > 0 && (
+                  <Box
+                    sx={{
+                      width: "100%",
+                      height: `${(day.created / maxValue) * 100}%`,
+                      bgcolor: "primary.main",
+                      borderRadius: "4px 4px 0 0",
+                      minHeight: "4px",
+                      transition: "all 0.3s ease",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "center",
+                      pt: 0.5,
+                    }}
+                  >
+                    {day.created > 0 && (
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "white", fontSize: "0.65rem" }}
+                      >
+                        {day.created}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                {day.completed > 0 && (
+                  <Box
+                    sx={{
+                      width: "100%",
+                      height: `${(day.completed / maxValue) * 100}%`,
+                      bgcolor: "success.main",
+                      borderRadius: day.created > 0 ? "0" : "4px 4px 0 0",
+                      minHeight: "4px",
+                      transition: "all 0.3s ease",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "center",
+                      pt: 0.5,
+                    }}
+                  >
+                    {day.completed > 0 && (
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "white", fontSize: "0.65rem" }}
+                      >
+                        {day.completed}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                {day.scheduled > 0 && (
+                  <Box
+                    sx={{
+                      width: "100%",
+                      height: `${(day.scheduled / maxValue) * 100}%`,
+                      bgcolor: "warning.main",
+                      borderRadius: "0 0 4px 4px",
+                      minHeight: "4px",
+                      transition: "all 0.3s ease",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "center",
+                      pt: 0.5,
+                    }}
+                  >
+                    {day.scheduled > 0 && (
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "white", fontSize: "0.65rem" }}
+                      >
+                        {day.scheduled}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+              <Typography
+                variant="caption"
+                sx={{
+                  fontSize: "0.65rem",
+                  textAlign: "center",
+                  maxWidth: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
-                <Box
-                  sx={{
-                    width: "100%",
-                    height: `${(day.created / maxValue) * 100}%`,
-                    bgcolor: "primary.main",
-                    borderRadius: "4px 4px 0 0",
-                    minHeight: day.created > 0 ? "4px" : "0",
-                    transition: "all 0.3s ease",
-                  }}
-                  title={`Created: ${day.created}`}
-                />
-                <Box
-                  sx={{
-                    width: "100%",
-                    height: `${(day.completed / maxValue) * 100}%`,
-                    bgcolor: "success.main",
-                    borderRadius: "0 0 4px 4px",
-                    minHeight: day.completed > 0 ? "4px" : "0",
-                    transition: "all 0.3s ease",
-                  }}
-                  title={`Completed: ${day.completed}`}
-                />
-              </Box>
-              <Typography variant="caption" sx={{ fontSize: "0.7rem" }}>
                 {day.date}
               </Typography>
             </Box>
@@ -377,6 +584,17 @@ export default function TodoApp() {
               }}
             />
             <Typography variant="caption">Completed</Typography>
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Box
+              sx={{
+                width: 12,
+                height: 12,
+                bgcolor: "warning.main",
+                borderRadius: 1,
+              }}
+            />
+            <Typography variant="caption">Scheduled</Typography>
           </Box>
         </Box>
       </Box>
@@ -445,6 +663,182 @@ export default function TodoApp() {
 
       {viewMode === "analytics" ? (
         <Grid container spacing={3}>
+          {/* Scheduled Tasks Section */}
+          <Grid item xs={12}>
+            <Card>
+              <CardContent>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    mb: 2,
+                    flexWrap: "wrap",
+                    gap: 2,
+                  }}
+                >
+                  <Typography variant="h6">Scheduled Tasks</Typography>
+                  <FormControl size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel>Filter Tasks</InputLabel>
+                    <Select
+                      value={taskFilter}
+                      label="Filter Tasks"
+                      onChange={(e) => setTaskFilter(e.target.value)}
+                    >
+                      <MenuItem value="all">All Tasks</MenuItem>
+                      <MenuItem value="scheduled">Scheduled</MenuItem>
+                      <MenuItem value="completed">Completed</MenuItem>
+                      <MenuItem value="pending">Pending</MenuItem>
+                      <MenuItem value="overdue">Overdue</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+                <Divider sx={{ mb: 2 }} />
+                {filteredTodos.length === 0 ? (
+                  <Typography color="text.secondary" textAlign="center" py={2}>
+                    No tasks found
+                  </Typography>
+                ) : (
+                  <Grid container spacing={2}>
+                    {filteredTodos.map((todo) => {
+                      const overdue = isOverdue(
+                        todo.scheduledAt,
+                        todo.completed
+                      );
+                      return (
+                        <Grid item xs={12} sm={6} md={4} key={todo.id}>
+                          <Card
+                            sx={{
+                              border: overdue ? 2 : 1,
+                              borderColor: overdue ? "error.main" : "divider",
+                              bgcolor:
+                                overdue && !todo.completed
+                                  ? "error.light"
+                                  : "background.paper",
+                              transition: "all 0.2s ease",
+                              "&:hover": {
+                                boxShadow: 4,
+                                transform: "translateY(-2px)",
+                              },
+                            }}
+                          >
+                            <CardContent>
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  gap: 1,
+                                }}
+                              >
+                                <Checkbox
+                                  checked={todo.completed}
+                                  onChange={() => handleToggleComplete(todo)}
+                                  size="small"
+                                />
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography
+                                    variant="subtitle1"
+                                    sx={{
+                                      textDecoration: todo.completed
+                                        ? "line-through"
+                                        : "none",
+                                      fontWeight:
+                                        overdue && !todo.completed ? 700 : 500,
+                                      mb: 1,
+                                    }}
+                                  >
+                                    {todo.title}
+                                  </Typography>
+                                  {todo.description && (
+                                    <Typography
+                                      variant="body2"
+                                      color="text.secondary"
+                                      sx={{ mb: 1 }}
+                                    >
+                                      {todo.description}
+                                    </Typography>
+                                  )}
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      gap: 1,
+                                      flexWrap: "wrap",
+                                      mb: 1,
+                                    }}
+                                  >
+                                    {todo.scheduledAt && (
+                                      <Chip
+                                        label={
+                                          <Box
+                                            sx={{
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: 0.5,
+                                            }}
+                                          >
+                                            <Icon
+                                              icon="solar:calendar-bold"
+                                              width={14}
+                                            />
+                                            {formatDate(todo.scheduledAt)}
+                                          </Box>
+                                        }
+                                        size="small"
+                                        color={
+                                          isOverdue(
+                                            todo.scheduledAt,
+                                            todo.completed
+                                          )
+                                            ? "error"
+                                            : "primary"
+                                        }
+                                      />
+                                    )}
+                                    {todo.completed && (
+                                      <Chip
+                                        label="Completed"
+                                        size="small"
+                                        color="success"
+                                        icon={
+                                          <Icon
+                                            icon="solar:check-circle-bold"
+                                            width={14}
+                                          />
+                                        }
+                                      />
+                                    )}
+                                  </Box>
+                                  <Box sx={{ display: "flex", gap: 1, mt: 1 }}>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleOpenDialog(todo)}
+                                      color="primary"
+                                    >
+                                      <Icon icon="solar:pen-bold" width={16} />
+                                    </IconButton>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleDelete(todo.id)}
+                                      color="error"
+                                    >
+                                      <Icon
+                                        icon="solar:trash-bin-trash-bold"
+                                        width={16}
+                                      />
+                                    </IconButton>
+                                  </Box>
+                                </Box>
+                              </Box>
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
           {/* Stats Cards */}
           <Grid item xs={12} sm={6} md={3}>
             <Card
@@ -583,7 +977,7 @@ export default function TodoApp() {
             </Card>
           </Grid>
 
-          {/* Weekly Chart */}
+          {/* Activity Chart */}
           <Grid item xs={12}>
             <Card>
               <CardContent>
@@ -593,7 +987,7 @@ export default function TodoApp() {
           </Grid>
         </Grid>
       ) : (
-        <>
+        <Box>
           {todos.length === 0 ? (
             <Card
               sx={{
@@ -628,152 +1022,175 @@ export default function TodoApp() {
               </CardContent>
             </Card>
           ) : (
-            <Grid container spacing={2}>
-              {todos.map((todo) => {
-                const overdue = isOverdue(todo.scheduledAt, todo.completed);
-                return (
-                  <Grid item xs={12} sm={6} md={4} key={todo.id}>
-                    <Card
-                      sx={{
-                        height: "100%",
-                        border: overdue ? 2 : 1,
-                        borderColor: overdue ? "error.main" : "divider",
-                        bgcolor:
-                          overdue && !todo.completed
-                            ? "error.light"
-                            : "background.paper",
-                        transition: "all 0.2s ease",
-                        "&:hover": {
-                          boxShadow: 4,
-                          transform: "translateY(-2px)",
-                        },
-                      }}
-                    >
-                      <ListItem>
-                        <Checkbox
-                          checked={todo.completed}
-                          onChange={() => handleToggleComplete(todo)}
-                          sx={{ mr: 1 }}
-                        />
-                        <ListItemText
-                          primary={
-                            <Box
-                              sx={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 1,
-                                flexWrap: "wrap",
-                                mb: 0.5,
-                              }}
-                            >
-                              <Typography
-                                variant="subtitle1"
-                                sx={{
-                                  textDecoration: todo.completed
-                                    ? "line-through"
-                                    : "none",
-                                  color: todo.completed
-                                    ? "text.secondary"
-                                    : overdue
-                                    ? "error.main"
-                                    : "text.primary",
-                                  fontWeight:
-                                    overdue && !todo.completed ? 700 : 500,
-                                }}
-                              >
-                                {todo.title}
-                              </Typography>
-                            </Box>
-                          }
-                          secondary={
-                            <Box sx={{ mt: 1 }}>
-                              {todo.description && (
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                  sx={{ mb: 1 }}
-                                >
-                                  {todo.description}
-                                </Typography>
-                              )}
+            <Box>
+              {/* Task Filter */}
+              <Box sx={{ mb: 2 }}>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel>Filter Tasks</InputLabel>
+                  <Select
+                    value={taskFilter}
+                    label="Filter Tasks"
+                    onChange={(e) => setTaskFilter(e.target.value)}
+                  >
+                    <MenuItem value="all">All Tasks</MenuItem>
+                    <MenuItem value="scheduled">Scheduled</MenuItem>
+                    <MenuItem value="completed">Completed</MenuItem>
+                    <MenuItem value="pending">Pending</MenuItem>
+                    <MenuItem value="overdue">Overdue</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <Grid container spacing={2}>
+                {filteredTodos.map((todo) => {
+                  const overdue = isOverdue(todo.scheduledAt, todo.completed);
+                  return (
+                    <Grid item xs={12} sm={6} md={4} key={todo.id}>
+                      <Card
+                        sx={{
+                          height: "100%",
+                          border: overdue ? 2 : 1,
+                          borderColor: overdue ? "error.main" : "divider",
+                          bgcolor:
+                            overdue && !todo.completed
+                              ? "error.light"
+                              : "background.paper",
+                          transition: "all 0.2s ease",
+                          "&:hover": {
+                            boxShadow: 4,
+                            transform: "translateY(-2px)",
+                          },
+                        }}
+                      >
+                        <ListItem>
+                          <Checkbox
+                            checked={todo.completed}
+                            onChange={() => handleToggleComplete(todo)}
+                            sx={{ mr: 1 }}
+                          />
+                          <ListItemText
+                            primary={
                               <Box
                                 sx={{
                                   display: "flex",
+                                  alignItems: "center",
                                   gap: 1,
                                   flexWrap: "wrap",
+                                  mb: 0.5,
                                 }}
                               >
-                                {todo.scheduledAt && (
-                                  <Chip
-                                    label={formatDate(todo.scheduledAt)}
-                                    size="small"
-                                    color={
-                                      isOverdue(
-                                        todo.scheduledAt,
-                                        todo.completed
-                                      )
-                                        ? "error"
-                                        : "primary"
-                                    }
-                                    icon={
-                                      <Icon
-                                        icon="solar:calendar-bold"
-                                        width={14}
-                                        height={14}
-                                      />
-                                    }
-                                  />
-                                )}
-                                {todo.completed && (
-                                  <Chip
-                                    label="Completed"
-                                    size="small"
-                                    color="success"
-                                    icon={
-                                      <Icon
-                                        icon="solar:check-circle-bold"
-                                        width={14}
-                                        height={14}
-                                      />
-                                    }
-                                  />
-                                )}
+                                <Typography
+                                  variant="subtitle1"
+                                  sx={{
+                                    textDecoration: todo.completed
+                                      ? "line-through"
+                                      : "none",
+                                    color: todo.completed
+                                      ? "text.secondary"
+                                      : overdue
+                                      ? "error.main"
+                                      : "text.primary",
+                                    fontWeight:
+                                      overdue && !todo.completed ? 700 : 500,
+                                  }}
+                                >
+                                  {todo.title}
+                                </Typography>
                               </Box>
-                            </Box>
-                          }
-                        />
-                      </ListItem>
-                      <Divider />
-                      <Box
-                        sx={{
-                          display: "flex",
-                          justifyContent: "flex-end",
-                          p: 1,
-                          gap: 1,
-                        }}
-                      >
-                        <IconButton
-                          size="small"
-                          onClick={() => handleOpenDialog(todo)}
-                          color="primary"
+                            }
+                            secondary={
+                              <Box sx={{ mt: 1 }}>
+                                {todo.description && (
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    sx={{ mb: 1 }}
+                                  >
+                                    {todo.description}
+                                  </Typography>
+                                )}
+                                <Box
+                                  sx={{
+                                    display: "flex",
+                                    gap: 1,
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  {todo.scheduledAt && (
+                                    <Chip
+                                      label={formatDate(todo.scheduledAt)}
+                                      size="small"
+                                      color={
+                                        isOverdue(
+                                          todo.scheduledAt,
+                                          todo.completed
+                                        )
+                                          ? "error"
+                                          : "primary"
+                                      }
+                                      icon={
+                                        <Icon
+                                          icon="solar:calendar-bold"
+                                          width={14}
+                                          height={14}
+                                        />
+                                      }
+                                    />
+                                  )}
+                                  {todo.completed && (
+                                    <Chip
+                                      label="Completed"
+                                      size="small"
+                                      color="success"
+                                      icon={
+                                        <Icon
+                                          icon="solar:check-circle-bold"
+                                          width={14}
+                                          height={14}
+                                        />
+                                      }
+                                    />
+                                  )}
+                                </Box>
+                              </Box>
+                            }
+                          />
+                        </ListItem>
+                        <Divider />
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "flex-end",
+                            p: 1,
+                            gap: 1,
+                          }}
                         >
-                          <Icon icon="solar:pen-bold" width={18} />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDelete(todo.id)}
-                          color="error"
-                        >
-                          <Icon icon="solar:trash-bin-trash-bold" width={18} />
-                        </IconButton>
-                      </Box>
-                    </Card>
-                  </Grid>
-                );
-              })}
-            </Grid>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenDialog(todo)}
+                            color="primary"
+                          >
+                            <Icon icon="solar:pen-bold" width={18} />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDelete(todo.id)}
+                            color="error"
+                          >
+                            <Icon
+                              icon="solar:trash-bin-trash-bold"
+                              width={18}
+                            />
+                          </IconButton>
+                        </Box>
+                      </Card>
+                    </Grid>
+                  );
+                })}
+              </Grid>
+            </Box>
           )}
-        </>
+        </Box>
       )}
 
       <Dialog
